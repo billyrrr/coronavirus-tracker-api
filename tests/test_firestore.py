@@ -1,9 +1,26 @@
+import time
 from unittest import mock
 
 import pytest
+from google.cloud.firestore_v1 import Query
 
-from app.firestore.location import retrieve_category
+from app.firestore.location import retrieve_category, LocationMediator, \
+    LocationDomainModel, RecordMediator
 from tests.test_jhu import mocked_requests_get, DATETIME_STRING
+
+import os
+from flask_boiler import config, context
+
+cert_path = os.path.curdir + \
+            "/app/config/covid-19-track-firebase-adminsdk-utg4o-ec50eb5da3.json"
+
+testing_config = config.Config(app_name="covid-19-track",
+                               debug=True,
+                               testing=True,
+                               certificate_path=cert_path)
+
+CTX = context.Context
+CTX.read(testing_config)
 
 
 @pytest.mark.parametrize("category, datetime_str, latest_value, country_name, \
@@ -22,18 +39,19 @@ def test_retrieve_category(mock_request_get, mock_datetime, category,
                            latest_value, country_name, country_code, province,
                            latest_country_value,
                            coordinate_lat, coordinate_long):
-    import os
-    from flask_boiler import config, context
-
-    cert_path = os.path.curdir + \
-                "/app/config/covid-19-track-firebase-adminsdk-utg4o-ec50eb5da3.json"
-
-    testing_config = config.Config(app_name="covid-19-track",
-                                   debug=True,
-                                   testing=True,
-                                   certificate_path=cert_path)
-
-    CTX = context.Context
-    CTX.read(testing_config)
-
     retrieve_category("recovered")
+
+
+def test_mediator():
+    location_mediator = LocationMediator(
+        query=Query(parent=LocationDomainModel._get_collection()))
+    location_mediator.start()
+
+    record_mediator = RecordMediator(
+        query=CTX.db.collection_group("records")
+    )
+    record_mediator.start()
+
+    time.sleep(5)
+
+    assert CTX.db.document("countries/Australia").get().get("recovered") == 134
