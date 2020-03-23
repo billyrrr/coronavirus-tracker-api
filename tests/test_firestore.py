@@ -52,6 +52,6 @@ def test_mediator():
     )
     record_mediator.start()
 
-    time.sleep(5)
+    time.sleep(10)
 
-    assert CTX.db.document("countries/Australia").get().get("recovered") == 134
+    assert CTX.db.document("countries/Australia").get().get("recovered") == 252

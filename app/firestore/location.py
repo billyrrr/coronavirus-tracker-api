@@ -1,3 +1,4 @@
+
 from flask_boiler import schema, fields, domain_model, factory, \
     view_mediator_dav, view_model
 from flask_boiler.context import Context as CTX
@@ -5,6 +6,8 @@ from google.cloud.firestore import WriteBatch, Increment
 from google.cloud.firestore_v1 import DocumentSnapshot, DocumentReference
 
 import base64
+import logging
+logger = logging.getLogger()
 
 
 def b64e(s):
@@ -67,7 +70,6 @@ class LocationDomainModel(LocationDomainModelBase):
 
 
 class LocationSubsetSchema(schema.Schema):
-
     case_conversion = False
     coordinates = fields.Dict()
     parts = fields.Dict()
@@ -110,7 +112,6 @@ class LocationSubset(LocationSubsetBase):
 
 
 class LocationMediator(view_mediator_dav.ViewMediatorDeltaDAV):
-
     class Protocol(view_mediator_dav.ProtocolBase):
 
         @staticmethod
@@ -132,6 +133,38 @@ class RecordMediator(view_mediator_dav.ViewMediatorDeltaDAV):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.store = dict()
+        self.change_set = list()
+
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        sched = BackgroundScheduler()
+
+        # seconds can be replaced with minutes, hours, or days
+        sched.add_job(self.commit, 'interval', seconds=2)
+        sched.start()
+
+    def close(self):
+        self.thread.cancel()
+
+    def commit(self):
+        try:
+            if len(self.change_set) == 0:
+                return
+            batch: WriteBatch = CTX.db.batch()
+            change_set, self.change_set = self.change_set, list()
+            for d in change_set:
+                batch.set(
+                    **d
+                )
+            else:
+                batch.commit()
+        except Exception as e:
+            logger.debug(msg=f"error encountered{e.__class__.__name__}")
+        finally:
+            logger.info("Done executing commit")
+
+    def notify(self, d):
+        self.change_set.append(d)
 
     class Protocol(view_mediator_dav.ProtocolBase):
 
@@ -139,19 +172,27 @@ class RecordMediator(view_mediator_dav.ViewMediatorDeltaDAV):
         def on_update(snapshot: DocumentSnapshot, mediator):
             existing = mediator.store.get(snapshot.id)
             delta = snapshot.get("latest") - existing.get("latest")
-            doc_ref = snapshot.reference.parent.parent
-            doc_ref.set(document_data={
-                "latest": Increment(delta)}, merge=True
-            )
+            logger.info(msg=f"on_update{snapshot.reference.parent.parent.id}: {delta}")
+            mediator.notify(
+                {
+                    "reference": snapshot.reference.parent.parent,
+                    "document_data": {
+                        snapshot.get("category"): Increment(delta)},
+                    "merge": True,
+                })
             mediator.store[snapshot.id] = snapshot
 
         @staticmethod
         def on_create(snapshot: DocumentSnapshot, mediator):
             delta = snapshot.get("latest")
-            doc_ref = snapshot.reference.parent.parent
-            doc_ref.set(document_data={
-                snapshot.get("category"): delta}
-            )
+            logger.info(msg=f"on_create{snapshot.reference.parent.parent.id}: {delta}")
+            mediator.notify(
+                {
+                    "reference": snapshot.reference.parent.parent,
+                    "document_data": {
+                        snapshot.get("category"): Increment(delta)},
+                    "merge": True,
+                })
             mediator.store[snapshot.id] = snapshot
 
 

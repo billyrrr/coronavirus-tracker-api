@@ -17,6 +17,7 @@ flask-cors = "*"
 cachetools = "*"
 python-dateutil = "*"
 flask-boiler = "*"
+apscheduler = "*"
 
 [requires]
 python_version = "3.8"
